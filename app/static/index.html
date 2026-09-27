@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LaTeX 文档生成器</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>📄 LaTeX 文档生成器</h1>
+  <div id="health" class="health">正在检测环境…</div>
+</header>
+
+<main class="layout">
+  <aside class="panel side">
+    <label class="field-label" for="doc-type">文档类型</label>
+    <select id="doc-type"></select>
+
+    <label class="field-label" for="prompt">需求描述</label>
+    <textarea id="prompt" rows="9"
+      placeholder="例如：帮我写一份《线性代数》期末复习笔记，中文，包含行列式、矩阵的秩、线性方程组三章；每章先总结知识点，再给 2 道例题和详细解答。"></textarea>
+
+    <div id="drop-zone">
+      <button id="btn-pick" class="ghost wide">📎 添加附件（.tex 格式示范 · .txt/.md/.pdf 知识来源 · 图片）</button>
+      <input type="file" id="file-input" multiple hidden
+        accept=".tex,.txt,.md,.markdown,.pdf,.png,.jpg,.jpeg,.webp" />
+    </div>
+    <div id="file-list"></div>
+    <div id="purpose-row" hidden>
+      <label class="field-label" for="att-purpose">附件用途</label>
+      <select id="att-purpose">
+        <option value="auto">自动判断（格式 + 内容）</option>
+        <option value="format">仅作格式示范</option>
+        <option value="content">仅作知识来源</option>
+      </select>
+    </div>
+
+    <div class="btn-row">
+      <button id="btn-generate" class="primary">生成 PDF</button>
+      <button id="btn-cancel" class="ghost" hidden>取消</button>
+    </div>
+
+    <ol class="steps" id="steps">
+      <li data-step="generate"><span class="dot"></span>生成 LaTeX</li>
+      <li data-step="compile"><span class="dot"></span>编译 PDF</li>
+      <li data-step="fix" hidden><span class="dot"></span>自动修复 <em id="fix-round"></em></li>
+      <li data-step="done"><span class="dot"></span>完成</li>
+    </ol>
+    <div id="status" class="status"></div>
+  </aside>
+
+  <section class="panel main">
+    <nav class="tabs">
+      <button class="tab active" data-tab="pdf">PDF 预览</button>
+      <button class="tab" data-tab="code">LaTeX 源码</button>
+      <button class="tab" data-tab="log" id="log-tab" hidden>编译日志</button>
+    </nav>
+
+    <div class="page active" id="page-pdf">
+      <div class="toolbar">
+        <a id="btn-download" class="btn" hidden download="document.pdf">⬇ 下载 PDF</a>
+        <button id="btn-copy" class="btn" hidden>复制源码</button>
+        <button id="btn-recompile" class="btn primary-btn" hidden>重新编译</button>
+      </div>
+      <embed id="pdf-view" type="application/pdf" hidden />
+      <div id="pdf-empty" class="placeholder">生成完成后，PDF 会显示在这里</div>
+    </div>
+
+    <div class="page" id="page-code">
+      <textarea id="code" spellcheck="false" readonly
+        placeholder="模型生成的 LaTeX 源码会实时显示在这里…"></textarea>
+    </div>
+
+    <div class="page" id="page-log">
+      <pre id="log">编译日志会显示在这里。</pre>
+    </div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# 密钥配置，绝不入库
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# 运行时产物（每个任务的 tex/pdf/日志）
+workspace/*
+!workspace/.gitkeep
+
+# 下载的二进制
+vendor/tectonic.exe
+vendor/*.zip
+
+# 工具缓存
+.v2c/
+.zcode/
