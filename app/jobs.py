@@ -17,11 +17,10 @@ class JobManager:
         self,
         prompt: str,
         doc_type: str = "auto",
-        att_purpose: str = "auto",
         attachments: list[dict] | None = None,
         kind: str = "generate",
     ) -> pipeline.Job:
-        job = pipeline.Job(prompt, doc_type, att_purpose, attachments, kind)
+        job = pipeline.Job(prompt, doc_type, attachments, kind)
         with self._lock:
             self._jobs[job.id] = job
         self._order.put(job.id)

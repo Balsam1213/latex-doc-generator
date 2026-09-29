@@ -40,9 +40,7 @@ def index():
 async def create_job(
     prompt: str = Form(""),
     doc_type: str = Form("auto"),
-    att_purpose: str = Form("auto"),
     kind: str = Form("generate"),
-    att_roles: list[str] = Form(default=[]),
     files: list[UploadFile] = File(default=[]),
 ):
     prompt = (prompt or "").strip()
@@ -54,8 +52,6 @@ async def create_job(
         prompt = "将 PDF 转换为 LaTeX 文档"
     if doc_type not in prompts.DOC_TYPES:
         raise HTTPException(400, "未知的文档类型")
-    if att_purpose not in ("auto", "format", "content"):
-        raise HTTPException(400, "未知的附件用途")
 
     # 先校验所有附件，再统一落盘、入队，避免产生无效任务
     metas = []
@@ -76,9 +72,6 @@ async def create_job(
         limit = config.MAX_UPLOAD_MB * 1024 * 1024
         for f, name, ext in metas:
             i = len(attachments)
-            role = att_roles[i] if i < len(att_roles) else "auto"
-            if role not in ("auto", "format", "content"):
-                role = "auto"
             dest = stage_dir / f"{i:02d}_{name}"
             size = 0
             try:
@@ -98,9 +91,9 @@ async def create_job(
                 att_kind = "pdf"
             else:
                 att_kind = "text"
-            attachments.append({"name": name, "kind": att_kind, "path": str(dest), "role": role})
+            attachments.append({"name": name, "kind": att_kind, "path": str(dest)})
 
-    job = jobs.manager.create(prompt, doc_type, att_purpose, attachments, kind)
+    job = jobs.manager.create(prompt, doc_type, attachments, kind)
     return {"job_id": job.id}
 
 

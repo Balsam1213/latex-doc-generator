@@ -36,36 +36,18 @@
         accept=".tex,.txt,.md,.markdown,.pdf,.png,.jpg,.jpeg,.webp" />
     </div>
     <div id="file-list"></div>
-    <div id="purpose-row" hidden>
-      <label class="field-label" for="att-purpose">附件默认用途（可在上方列表逐个调整）</label>
-      <select id="att-purpose">
-        <option value="auto">自动判断（格式 + 内容）</option>
-        <option value="format">格式示范（PDF 将先转换为 LaTeX）</option>
-        <option value="content">知识来源</option>
-      </select>
-    </div>
-
     <div class="btn-row">
       <button id="btn-generate" class="primary">生成 PDF</button>
       <button id="btn-cancel" class="ghost" hidden>取消</button>
     </div>
 
     <ol class="steps" id="steps">
-      <li data-step="convert" hidden><span class="dot"></span>转换 PDF 附件</li>
       <li data-step="generate"><span class="dot"></span>生成 LaTeX</li>
       <li data-step="compile"><span class="dot"></span>编译 PDF</li>
       <li data-step="fix" hidden><span class="dot"></span>自动修复 <em id="fix-round"></em></li>
       <li data-step="done"><span class="dot"></span>完成</li>
     </ol>
     <div id="status" class="status"></div>
-
-    <div class="history-box">
-      <div class="field-label history-head">
-        🕘 历史记录
-        <button id="btn-hist-refresh" class="linklike">刷新</button>
-      </div>
-      <ul id="history" class="history"><li class="hist-empty">暂无记录</li></ul>
-    </div>
   </aside>
 
   <section class="panel main">
@@ -73,6 +55,7 @@
       <button class="tab active" data-tab="pdf">PDF 预览</button>
       <button class="tab" data-tab="code">LaTeX 源码</button>
       <button class="tab" data-tab="log" id="log-tab" hidden>编译日志</button>
+      <button class="tab" data-tab="hist">🕘 历史</button>
     </nav>
 
     <div class="page active" id="page-pdf">
@@ -94,6 +77,14 @@
 
     <div class="page" id="page-log">
       <pre id="log">编译日志会显示在这里。</pre>
+    </div>
+
+    <div class="page" id="page-hist">
+      <div class="hist-toolbar">
+        <button id="btn-hist-refresh" class="btn">↻ 刷新</button>
+        <span class="hist-note">点击条目回看源码与 PDF；✕ 删除记录及其文件</span>
+      </div>
+      <ul id="history" class="history"><li class="hist-empty">暂无记录</li></ul>
     </div>
   </section>
 </main>

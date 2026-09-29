@@ -49,14 +49,21 @@ button.ghost.small { padding: 5px 10px; font-size: 12.5px; border-radius: 8px; }
 #pdf2tex-box { margin-top: 8px; }
 #btn-pdf2tex.wide { width: 100%; justify-content: center; font-size: 12.5px; }
 
-/* ---------- 历史记录 ---------- */
-.history-box { margin-top: 14px; }
-.history-head { display: flex; align-items: center; }
+/* ---------- 历史记录（页签） ---------- */
+.hist-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+.hist-note { font-size: 12px; color: var(--muted); }
 .history {
   list-style: none;
-  margin: 6px 0 0; padding: 0;
-  display: flex; flex-direction: column; gap: 4px;
-  max-height: 260px; overflow-y: auto;
+  margin: 0;
+  padding: 0 0 8px;
+  display: flex; flex-direction: column; gap: 5px;
+  flex: 1;
+  overflow-y: auto;
 }
 .hist-empty { font-size: 12.5px; color: var(--muted); padding: 4px 6px; }
 .hist-item {
@@ -272,15 +279,6 @@ button.ghost:hover, .btn:hover { background: #f6f8fd; color: var(--text); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-item .role-sel {
-  flex: none;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 11.5px;
-  padding: 2px 3px;
-  background: #fff;
-  color: var(--text);
-}
 .file-item .rm {
   border: none;
   background: none;
@@ -289,7 +287,6 @@ button.ghost:hover, .btn:hover { background: #f6f8fd; color: var(--text); }
   font-size: 14px;
   padding: 0 2px;
 }
-#purpose-row[hidden] { display: none; }
 
 /* ---------- 右侧输出区 ---------- */
 .tabs {

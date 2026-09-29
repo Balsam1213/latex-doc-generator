@@ -230,51 +230,19 @@ VISION_PROMPT = """请分两部分输出对这张图片的描述：
 2）内容转录：完整转录图中出现的文字（保持层级结构）；数学公式用 LaTeX 语法转录；表格逐行转录（用「列1：…；列2：…」形式）；如有图形请说明其表达的信息。
 如果这不是版面截图而是照片或示意图，则跳过第 1 部分，直接详细描述图中可见的内容与信息。"""
 
-_ATTACHMENT_PURPOSE_NOTES = {
-    "format": "请严格模仿以下附件的结构、导言区设置与排版风格；生成的内容按用户需求撰写，不要照搬附件中的具体内容。",
-    "content": "以下附件仅作为内容素材与事实依据，与其冲突时以附件为准；不必模仿其格式。",
-    "auto": "以下附件既可作为内容素材与事实依据，也可借鉴其结构与排版风格；若附件本身是格式示范（LaTeX 源码或版面截图），请优先模仿其格式。",
-}
+def build_attachment_section(parts: list[dict]) -> str:
+    """把各附件的处理结果拼成提示词段落（中性标注，用途由用户需求描述决定）。
 
-
-def build_attachment_section(default_purpose: str, parts: list[dict]) -> str:
-    """按每个附件的角色分组构建提示词段落。
-
-    parts: [{"label": 类别, "name": 文件名, "text": 处理结果, "role": "format|content|auto"}, ...]
-    role 为 "auto" 的附件归入 default_purpose 对应的组。
+    parts: [{"label": 类型标注, "name": 文件名, "text": 处理结果}, ...]
     """
     if not parts:
         return ""
-
-    def _group(p: dict) -> str:
-        role = p.get("role", "auto")
-        if role in ("format", "content"):
-            return role
-        return default_purpose if default_purpose in ("format", "content") else "auto"
-
-    groups: dict[str, list[dict]] = {"format": [], "content": [], "auto": []}
-    for p in parts:
-        groups[_group(p)].append(p)
-
-    titles = {
-        "format": ("【格式示范附件】", _ATTACHMENT_PURPOSE_NOTES["format"]),
-        "content": ("【知识来源附件】", _ATTACHMENT_PURPOSE_NOTES["content"]),
-        "auto": ("【综合参考附件】", _ATTACHMENT_PURPOSE_NOTES["auto"]),
-    }
-
-    sections = []
-    for key in ("format", "content", "auto"):
-        if not groups[key]:
-            continue
-        title, note = titles[key]
-        blocks = [
-            f"### {p['label']}——《{p['name']}》\n```\n{p['text']}\n```" for p in groups[key]
-        ]
-        sections.append(f"{title}共 {len(groups[key])} 份。{note}\n\n" + "\n\n".join(blocks))
-
+    blocks = [
+        f"### {p['label']}——《{p['name']}》\n```\n{p['text']}\n```" for p in parts
+    ]
     return (
-        "【附件参考资料】以下是用户上传附件的处理结果。\n"
-        "通用规则：若参考的 LaTeX 源码中含有 \\includegraphics、\\input 等外部文件引用，"
-        "必须以等价方式替代（如 TikZ 绘制、直接写内容或删除），不得引用不存在的文件。\n\n"
-        + "\n\n".join(sections)
+        "【附件参考资料】以下是用户上传的附件内容；每个附件的用途请结合用户的需求描述理解。\n"
+        "通用规则：若其中含有 \\includegraphics、\\input 等外部文件引用，"
+        "生成时必须以等价方式替代（如 TikZ 绘制、直接写内容或删除），不得引用不存在的文件。\n\n"
+        + "\n\n".join(blocks)
     )
