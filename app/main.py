@@ -42,6 +42,7 @@ async def create_job(
     doc_type: str = Form("auto"),
     att_purpose: str = Form("auto"),
     kind: str = Form("generate"),
+    att_roles: list[str] = Form(default=[]),
     files: list[UploadFile] = File(default=[]),
 ):
     prompt = (prompt or "").strip()
@@ -74,7 +75,11 @@ async def create_job(
         stage_dir.mkdir(parents=True, exist_ok=True)
         limit = config.MAX_UPLOAD_MB * 1024 * 1024
         for f, name, ext in metas:
-            dest = stage_dir / f"{len(attachments):02d}_{name}"
+            i = len(attachments)
+            role = att_roles[i] if i < len(att_roles) else "auto"
+            if role not in ("auto", "format", "content"):
+                role = "auto"
+            dest = stage_dir / f"{i:02d}_{name}"
             size = 0
             try:
                 with dest.open("wb") as out:
@@ -93,7 +98,7 @@ async def create_job(
                 att_kind = "pdf"
             else:
                 att_kind = "text"
-            attachments.append({"name": name, "kind": att_kind, "path": str(dest)})
+            attachments.append({"name": name, "kind": att_kind, "path": str(dest), "role": role})
 
     job = jobs.manager.create(prompt, doc_type, att_purpose, attachments, kind)
     return {"job_id": job.id}

@@ -231,24 +231,50 @@ VISION_PROMPT = """请分两部分输出对这张图片的描述：
 如果这不是版面截图而是照片或示意图，则跳过第 1 部分，直接详细描述图中可见的内容与信息。"""
 
 _ATTACHMENT_PURPOSE_NOTES = {
-    "auto": "附件既可作为内容素材与事实依据，也可借鉴其结构与排版风格；若附件本身是格式示范（如 LaTeX 源码或版面截图），请优先模仿其格式，内容按用户需求撰写。",
-    "format": "只参考附件的格式、结构与排版风格，不要照搬附件中的具体内容；生成的内容以用户需求描述为准。",
-    "content": "附件仅作为内容素材与事实依据使用，与其冲突时以附件为准；不必模仿附件的格式。",
+    "format": "请严格模仿以下附件的结构、导言区设置与排版风格；生成的内容按用户需求撰写，不要照搬附件中的具体内容。",
+    "content": "以下附件仅作为内容素材与事实依据，与其冲突时以附件为准；不必模仿其格式。",
+    "auto": "以下附件既可作为内容素材与事实依据，也可借鉴其结构与排版风格；若附件本身是格式示范（LaTeX 源码或版面截图），请优先模仿其格式。",
 }
 
 
-def build_attachment_section(purpose: str, parts: list[tuple[str, str, str]]) -> str:
-    """把各附件的处理结果拼成提示词段落。parts: [(类别标签, 文件名, 文本), ...]"""
+def build_attachment_section(default_purpose: str, parts: list[dict]) -> str:
+    """按每个附件的角色分组构建提示词段落。
+
+    parts: [{"label": 类别, "name": 文件名, "text": 处理结果, "role": "format|content|auto"}, ...]
+    role 为 "auto" 的附件归入 default_purpose 对应的组。
+    """
     if not parts:
         return ""
-    blocks = []
-    for label, name, text in parts:
-        blocks.append(f"### {label}——《{name}》\n```\n{text}\n```")
-    note = _ATTACHMENT_PURPOSE_NOTES.get(purpose, _ATTACHMENT_PURPOSE_NOTES["auto"])
+
+    def _group(p: dict) -> str:
+        role = p.get("role", "auto")
+        if role in ("format", "content"):
+            return role
+        return default_purpose if default_purpose in ("format", "content") else "auto"
+
+    groups: dict[str, list[dict]] = {"format": [], "content": [], "auto": []}
+    for p in parts:
+        groups[_group(p)].append(p)
+
+    titles = {
+        "format": ("【格式示范附件】", _ATTACHMENT_PURPOSE_NOTES["format"]),
+        "content": ("【知识来源附件】", _ATTACHMENT_PURPOSE_NOTES["content"]),
+        "auto": ("【综合参考附件】", _ATTACHMENT_PURPOSE_NOTES["auto"]),
+    }
+
+    sections = []
+    for key in ("format", "content", "auto"):
+        if not groups[key]:
+            continue
+        title, note = titles[key]
+        blocks = [
+            f"### {p['label']}——《{p['name']}》\n```\n{p['text']}\n```" for p in groups[key]
+        ]
+        sections.append(f"{title}共 {len(groups[key])} 份。{note}\n\n" + "\n\n".join(blocks))
+
     return (
-        f"【附件参考资料】以下是用户上传附件的处理结果，共 {len(parts)} 份。\n"
-        f"使用原则：{note}\n"
-        "另外：若参考的 LaTeX 源码中含有 \\includegraphics、\\input 等外部文件引用，"
+        "【附件参考资料】以下是用户上传附件的处理结果。\n"
+        "通用规则：若参考的 LaTeX 源码中含有 \\includegraphics、\\input 等外部文件引用，"
         "必须以等价方式替代（如 TikZ 绘制、直接写内容或删除），不得引用不存在的文件。\n\n"
-        + "\n\n".join(blocks)
+        + "\n\n".join(sections)
     )

@@ -74,6 +74,23 @@ def stream_chat(
         raise LLMError(_explain(e)) from e
 
 
+def chat_once(messages: list[dict], temperature: float = 0.2) -> str:
+    """一次性（非流式）对话，返回完整回复文本。失败抛 LLMError。"""
+    client = _make_client()
+    try:
+        resp = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=config.LLM_MAX_TOKENS,
+        )
+        return resp.choices[0].message.content or ""
+    except openai.OpenAIError as e:
+        raise LLMError(_explain(e)) from e
+    except Exception as e:
+        raise LLMError(_explain(e)) from e
+
+
 def describe_images(data_url: str) -> str:
     """调用视觉模型识别单张图片（data URL 形式），返回描述文本。失败抛 LLMError。"""
     client = _make_client()

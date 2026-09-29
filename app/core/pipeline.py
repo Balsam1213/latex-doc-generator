@@ -74,34 +74,113 @@ def _image_data_url(path: Path) -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def _prepare_attachments(job: "Job") -> str:
-    """处理各附件：tex/文本直接读取，PDF 提取文本，图片走视觉模型。失败的单个附件跳过。"""
-    parts: list[tuple[str, str, str]] = []
-    others = [a for a in job.attachments if a["kind"] != "image"]
-    images = [a for a in job.attachments if a["kind"] == "image"]
+def _effective_role(att: dict, default_purpose: str) -> str:
+    """单个附件的最终用途：文件级角色优先，否则继承全局默认；.tex 天然适合格式示范。"""
+    role = att.get("role", "auto")
+    if role not in ("auto", "format", "content"):
+        role = "auto"
+    if role == "auto":
+        role = default_purpose if default_purpose in ("format", "content") else "auto"
+    if role == "auto" and att.get("kind") == "tex":
+        role = "format"
+    return role
 
-    for att in others:
+
+def _prepare_attachments(job: "Job") -> str:
+    """处理各附件：tex/文本直接读取，PDF 提取文本，图片走视觉模型。
+
+    角色（role）决定用途：「format」格式示范、「content」知识来源、「auto」综合参考。
+    被指定为格式示范的 PDF 会先经模型转换为 LaTeX（近似重建），转换过程通过事件展示。
+    """
+    parts: list[dict] = []
+    atts = job.attachments
+
+    # 先计算每个附件的最终角色；格式示范 PDF 需要先转换
+    for att in atts:
+        att["role_eff"] = _effective_role(att, job.att_purpose)
+    convert_targets = [a for a in atts if a["kind"] == "pdf" and a["role_eff"] == "format"]
+    if convert_targets:
+        job.emit({
+            "type": "stage", "stage": "converting", "round": len(convert_targets),
+        })
+
+    for att in atts:
+        name = att["name"]
         path = Path(att["path"])
+        role = att.get("role_eff", "auto")
+
+        # 格式示范 PDF：先转换为 LaTeX 再作为格式参考
+        if att["kind"] == "pdf" and role == "format":
+            job.emit({"type": "notice", "text": f"正在将 PDF《{name}》转换为 LaTeX（作为格式示范）…"})
+            converted = None
+            try:
+                text = _clip(_pdf_text(path), _PDF_TEXT_LIMIT)
+                messages = [
+                    {"role": "system", "content": prompts.CONVERT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompts.build_convert_prompt(text)},
+                ]
+                converted = extract_tex(llm_client.chat_once(messages))
+            except Exception as e:
+                job.emit({"type": "notice", "text": f"⚠ PDF《{name}》转换失败：{e}"})
+            if converted:
+                parts.append({
+                    "label": "格式示范（由 PDF 近似转换的 LaTeX）",
+                    "name": name,
+                    "text": _clip(converted, _TEXT_PART_LIMIT),
+                    "role": "format",
+                })
+                job.emit({
+                    "type": "notice",
+                    "text": f"✔ PDF《{name}》已转换为 LaTeX（{len(converted)} 字符），将作为格式示范使用。",
+                })
+            else:
+                job.emit({"type": "notice", "text": f"⚠ 《{name}》将退回为文本知识来源使用。"})
+                try:
+                    parts.append({
+                        "label": "知识来源（PDF 文本，转换失败回退）",
+                        "name": name,
+                        "text": _clip(_pdf_text(path), _TEXT_PART_LIMIT),
+                        "role": "content",
+                    })
+                except Exception:
+                    pass
+            continue
+
         try:
             if att["kind"] == "tex":
-                text = _clip(path.read_text(encoding="utf-8", errors="replace"), _TEXT_PART_LIMIT)
-                parts.append(("格式示范（LaTeX 源码）", att["name"], text))
+                label = "LaTeX 源码（用作内容参考）" if role == "content" else "格式示范（LaTeX 源码）"
+                parts.append({
+                    "label": label, "name": name,
+                    "text": _clip(path.read_text(encoding="utf-8", errors="replace"), _TEXT_PART_LIMIT),
+                    "role": role,
+                })
             elif att["kind"] == "pdf":
-                text = _clip(_pdf_text(path), _TEXT_PART_LIMIT)
-                parts.append(("知识来源（PDF 文本）", att["name"], text))
+                parts.append({
+                    "label": "知识来源（PDF 文本）", "name": name,
+                    "text": _clip(_pdf_text(path), _TEXT_PART_LIMIT),
+                    "role": role,
+                })
             else:
-                text = _clip(path.read_text(encoding="utf-8", errors="replace"), _TEXT_PART_LIMIT)
-                parts.append(("知识来源（文本）", att["name"], text))
+                parts.append({
+                    "label": "知识来源（文本）", "name": name,
+                    "text": _clip(path.read_text(encoding="utf-8", errors="replace"), _TEXT_PART_LIMIT),
+                    "role": role,
+                })
         except Exception as e:
-            job.emit({"type": "notice", "text": f"⚠ 附件 {att['name']} 处理失败，已跳过：{e}"})
+            job.emit({"type": "notice", "text": f"⚠ 附件 {name} 处理失败，已跳过：{e}"})
 
-    for att in images:
-        job.emit({"type": "notice", "text": f"正在用视觉模型识别图片 {att['name']}…"})
+    for att in [a for a in atts if a["kind"] == "image"]:
+        name = att["name"]
+        job.emit({"type": "notice", "text": f"正在用视觉模型识别图片 {name}…"})
         try:
             desc = llm_client.describe_images(_image_data_url(Path(att["path"])))
-            parts.append(("图片识别结果", att["name"], _clip(desc, _IMAGE_DESC_LIMIT)))
+            parts.append({
+                "label": "图片识别结果", "name": name,
+                "text": _clip(desc, _IMAGE_DESC_LIMIT),
+                "role": att.get("role_eff", "auto"),
+            })
         except Exception as e:
-            job.emit({"type": "notice", "text": f"⚠ 图片 {att['name']} 识别失败，已跳过：{e}"})
+            job.emit({"type": "notice", "text": f"⚠ 图片 {name} 识别失败，已跳过：{e}"})
 
     return prompts.build_attachment_section(job.att_purpose, parts)
 
@@ -147,7 +226,9 @@ class Job:
             "created_at": self.created_at,
             "finished_at": time.time(),
             "error": self.error,
-            "attachments": [a["name"] for a in self.attachments],
+            "attachments": [
+                {"name": a["name"], "role": a.get("role", "auto")} for a in self.attachments
+            ],
         }
 
     def save_meta(self) -> None:

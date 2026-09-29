@@ -37,11 +37,11 @@
     </div>
     <div id="file-list"></div>
     <div id="purpose-row" hidden>
-      <label class="field-label" for="att-purpose">附件用途</label>
+      <label class="field-label" for="att-purpose">附件默认用途（可在上方列表逐个调整）</label>
       <select id="att-purpose">
         <option value="auto">自动判断（格式 + 内容）</option>
-        <option value="format">仅作格式示范</option>
-        <option value="content">仅作知识来源</option>
+        <option value="format">格式示范（PDF 将先转换为 LaTeX）</option>
+        <option value="content">知识来源</option>
       </select>
     </div>
 
@@ -51,6 +51,7 @@
     </div>
 
     <ol class="steps" id="steps">
+      <li data-step="convert" hidden><span class="dot"></span>转换 PDF 附件</li>
       <li data-step="generate"><span class="dot"></span>生成 LaTeX</li>
       <li data-step="compile"><span class="dot"></span>编译 PDF</li>
       <li data-step="fix" hidden><span class="dot"></span>自动修复 <em id="fix-round"></em></li>

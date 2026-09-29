@@ -5,7 +5,7 @@ const state = {
   jobId: null, es: null, busy: false, codeShown: false, lastSource: null,
   files: [], kind: "generate",
 };
-const STEP_ORDER = ["generate", "compile", "fix", "done"];
+const STEP_ORDER = ["convert", "generate", "compile", "fix", "done"];
 const FILE_EXTS = [".tex", ".txt", ".md", ".markdown", ".pdf", ".png", ".jpg", ".jpeg", ".webp"];
 
 /* ---------- 环境自检 ---------- */
@@ -83,6 +83,7 @@ function resetOutput() {
   $("#log-tab").hidden = true;
   $("#fix-round").textContent = "";
   $(`#steps li[data-step="fix"]`).hidden = true;
+  $(`#steps li[data-step="convert"]`).hidden = true;
   setStep(null);
   setStatus("");
 }
@@ -100,8 +101,8 @@ function addFiles(list) {
       setStatus(`附件 ${f.name} 超过 10MB 限制`);
       continue;
     }
-    if (state.files.some((x) => x.name === f.name && x.size === f.size)) continue;
-    state.files.push(f);
+    if (state.files.some((x) => x.file.name === f.name && x.file.size === f.size)) continue;
+    state.files.push({ file: f, role: "auto" });
   }
   renderFiles();
 }
@@ -109,16 +110,33 @@ function addFiles(list) {
 function renderFiles() {
   const box = $("#file-list");
   box.innerHTML = "";
-  state.files.forEach((f, i) => {
+  state.files.forEach((item, i) => {
+    const f = item.file;
     const div = document.createElement("div");
     div.className = "file-item";
     const size = f.size < 1024 * 1024
       ? `${Math.max(1, Math.round(f.size / 1024))} KB`
       : `${(f.size / 1024 / 1024).toFixed(1)} MB`;
+
     const span = document.createElement("span");
     span.className = "name";
     span.textContent = `📎 ${f.name}（${size}）`;
     span.title = f.name;
+
+    const roleSel = document.createElement("select");
+    roleSel.className = "role-sel";
+    roleSel.title = "这个附件的用途";
+    for (const [val, label] of [["auto", "综合参考"], ["format", "格式示范"], ["content", "知识来源"]]) {
+      const o = document.createElement("option");
+      o.value = val;
+      o.textContent = label;
+      roleSel.appendChild(o);
+    }
+    roleSel.value = item.role;
+    roleSel.addEventListener("change", () => {
+      item.role = roleSel.value;
+    });
+
     const rm = document.createElement("button");
     rm.className = "rm";
     rm.textContent = "✕";
@@ -127,7 +145,8 @@ function renderFiles() {
       state.files.splice(i, 1);
       renderFiles();
     });
-    div.append(span, rm);
+
+    div.append(span, roleSel, rm);
     box.appendChild(div);
   });
   $("#purpose-row").hidden = state.files.length === 0;
@@ -175,8 +194,13 @@ async function generate() {
   const fd = new FormData();
   fd.append("prompt", prompt);
   fd.append("doc_type", $("#doc-type").value);
-  if (state.files.length) fd.append("att_purpose", $("#att-purpose").value);
-  for (const f of state.files) fd.append("files", f, f.name);
+  if (state.files.length) {
+    fd.append("att_purpose", $("#att-purpose").value);
+    for (const it of state.files) {
+      fd.append("files", it.file, it.file.name);
+      fd.append("att_roles", it.role);
+    }
+  }
   await startJob(fd, "generate");
 }
 
@@ -191,7 +215,11 @@ function pdf2tex(file) {
 
 function handleEvent(ev) {
   if (ev.type === "stage") {
-    if (ev.stage === "preparing") {
+    if (ev.stage === "converting") {
+      $(`#steps li[data-step="convert"]`).hidden = false;
+      setStep("convert");
+      setStatus(`正在把 PDF 附件转换为 LaTeX 作为格式示范（共 ${ev.round} 份）…`);
+    } else if (ev.stage === "preparing") {
       setStatus("正在读取与识别附件…");
     } else if (ev.stage === "generating") {
       setStep("generate");
@@ -438,11 +466,12 @@ async function useAsFormat() {
     const res = await fetch(`/workspace/${state.jobId}/main.tex?t=` + Date.now());
     const text = await res.text();
     const file = new File([text], "converted_format.tex", { type: "application/x-tex" });
-    state.files = state.files.filter((f) => f.name !== file.name);
-    state.files.push(file);
+    const idx = state.files.findIndex((it) => it.file.name === file.name);
+    const item = { file, role: "format" };
+    if (idx >= 0) state.files[idx] = item;
+    else state.files.push(item);
     renderFiles();
-    $("#att-purpose").value = "format";
-    setStatus("已把转换结果加入附件，用途设为「仅作格式示范」。填写需求后点「生成 PDF」。");
+    setStatus("已把转换结果加入附件（用途：格式示范）。填写需求后点「生成 PDF」。");
     $("#prompt").focus();
   } catch (e) {
     setStatus("✘ 读取转换结果失败，请重试。");
