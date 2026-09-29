@@ -19,6 +19,16 @@ app = FastAPI(title="LaTeX 文档生成器")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+
+@app.middleware("http")
+async def no_cache_app_shell(request, call_next):
+    """页面与静态资源要求每次使用前重新校验，避免浏览器缓存旧版脚本导致按钮失效。"""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # python -m app.main / start_app.pyw 启动时持有 uvicorn.Server，供「退出服务」使用
 server_handle: dict = {"server": None}
 

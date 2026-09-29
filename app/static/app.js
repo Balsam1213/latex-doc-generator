@@ -1,5 +1,9 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
+function $on(sel, ev, fn) {
+  const el = typeof sel === "string" ? $(sel) : sel;
+  if (el) el.addEventListener(ev, fn);
+}
 
 const state = {
   jobId: null, es: null, busy: false, codeShown: false, lastSource: null,
@@ -494,7 +498,7 @@ async function saveSettings() {
 }
 
 /* ---------- 事件绑定 ---------- */
-$("#code").addEventListener("input", () => {
+$on("#code", "input", () => {
   // 已有编译结果时，提示用户可重新编译使修改生效
   if (!state.busy && state.lastSource !== null) {
     if ($("#code").value !== state.lastSource) {
@@ -502,49 +506,49 @@ $("#code").addEventListener("input", () => {
     }
   }
 });
-$("#btn-generate").addEventListener("click", generate);
-$("#btn-cancel").addEventListener("click", cancelJob);
-$("#btn-copy").addEventListener("click", copyCode);
-$("#btn-recompile").addEventListener("click", recompile);
+$on("#btn-generate", "click", generate);
+$on("#btn-cancel", "click", cancelJob);
+$on("#btn-copy", "click", copyCode);
+$on("#btn-recompile", "click", recompile);
 $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 $('.tab[data-tab="hist"]').addEventListener("click", loadHistory);
 
-$("#btn-pick").addEventListener("click", () => $("#file-input").click());
-$("#file-input").addEventListener("change", (e) => {
+$on("#btn-pick", "click", () => $("#file-input").click());
+$on("#file-input", "change", (e) => {
   addFiles([...e.target.files]);
   e.target.value = "";
 });
 const dropZone = $("#drop-zone");
-dropZone.addEventListener("dragover", (e) => {
+$on(dropZone, "dragover", (e) => {
   e.preventDefault();
   dropZone.classList.add("dragover");
 });
-dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
-dropZone.addEventListener("drop", (e) => {
+$on(dropZone, "dragleave", () => dropZone.classList.remove("dragover"));
+$on(dropZone, "drop", (e) => {
   e.preventDefault();
   dropZone.classList.remove("dragover");
   addFiles([...e.dataTransfer.files]);
 });
 
-$("#btn-pdf2tex").addEventListener("click", () => $("#pdf2tex-input").click());
-$("#pdf2tex-input").addEventListener("change", (e) => {
+$on("#btn-pdf2tex", "click", () => $("#pdf2tex-input").click());
+$on("#pdf2tex-input", "change", (e) => {
   const f = e.target.files[0];
   if (f) pdf2tex(f);
   e.target.value = "";
 });
-$("#btn-use-format").addEventListener("click", useAsFormat);
-$("#btn-shutdown").addEventListener("click", shutdownService);
-$("#btn-hist-refresh").addEventListener("click", loadHistory);
-$("#btn-settings").addEventListener("click", openSettings);
-$("#cfg-save").addEventListener("click", saveSettings);
-$("#cfg-cancel").addEventListener("click", closeSettings);
-$("#cfg-key").addEventListener("keydown", (e) => {
+$on("#btn-use-format", "click", useAsFormat);
+$on("#btn-shutdown", "click", shutdownService);
+$on("#btn-hist-refresh", "click", loadHistory);
+$on("#btn-settings", "click", openSettings);
+$on("#cfg-save", "click", saveSettings);
+$on("#cfg-cancel", "click", closeSettings);
+$on("#cfg-key", "keydown", (e) => {
   if (e.key === "Enter") saveSettings();
 });
-$("#modal-mask").addEventListener("click", (e) => {
+$on("#modal-mask", "click", (e) => {
   if (e.target === $("#modal-mask")) closeSettings();
 });
-$("#btn-tex-dl").addEventListener("click", (e) => {
+$on("#btn-tex-dl", "click", (e) => {
   if (!e.currentTarget.href) e.preventDefault();
 });
 
