@@ -202,6 +202,27 @@ def build_fix_prompt(tex: str, error_log: str) -> str:
     )
 
 
+# ---------- PDF → LaTeX 转换 ----------
+
+CONVERT_SYSTEM_PROMPT = r"""你是 PDF→LaTeX 转换专家。用户提供一份从 PDF 提取的纯文本，请你将其重建为一份结构对应的 LaTeX 文档。
+
+要求：
+1. 只输出一个 ```latex 代码块，为完整可编译文档（从 \documentclass 到 \end{document}）。
+2. 尽量还原原文结构：标题层级、章节、列表、表格（用 booktabs 三线表重建）、数学公式（用 LaTeX 语法重写）。
+3. 图片无法还原：在对应位置用注释「% 原文此处有图：…」或 \fbox 占位框说明，禁止引用外部图片文件。
+4. 中文内容使用 ctexart 文档类，纯英文用 article；编译引擎为 XeTeX。
+5. 只使用常见宏包（ctex、amsmath、amssymb、graphicx、booktabs、longtable、geometry、hyperref、xcolor、enumitem 等）。
+6. 忠实于原文内容，不要增删观点；原文提取乱码或缺失处用 [?] 标注。
+7. 这是对 PDF 的近似重建，无法与原版式完全一致，请优先保证内容完整、结构清晰、可编译。"""
+
+
+def build_convert_prompt(pdf_text: str) -> str:
+    return (
+        "【从 PDF 提取的文本内容】\n```\n" + pdf_text + "\n```\n\n"
+        "请将其重建为对应的 LaTeX 文档。"
+    )
+
+
 # ---------- 附件（上传文件/图片）相关提示词 ----------
 
 VISION_PROMPT = """请分两部分输出对这张图片的描述：

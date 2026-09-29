@@ -16,15 +16,20 @@ class JobManager:
     def create(
         self,
         prompt: str,
-        doc_type: str,
+        doc_type: str = "auto",
         att_purpose: str = "auto",
         attachments: list[dict] | None = None,
+        kind: str = "generate",
     ) -> pipeline.Job:
-        job = pipeline.Job(prompt, doc_type, att_purpose, attachments)
+        job = pipeline.Job(prompt, doc_type, att_purpose, attachments, kind)
         with self._lock:
             self._jobs[job.id] = job
         self._order.put(job.id)
         return job
+
+    def forget(self, job_id: str) -> None:
+        with self._lock:
+            self._jobs.pop(job_id, None)
 
     def get(self, job_id: str) -> pipeline.Job | None:
         return self._jobs.get(job_id)

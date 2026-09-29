@@ -9,7 +9,10 @@
 <body>
 <header class="topbar">
   <h1>📄 LaTeX 文档生成器</h1>
-  <div id="health" class="health">正在检测环境…</div>
+  <div class="topbar-right">
+    <div id="health" class="health">正在检测环境…</div>
+    <button id="btn-shutdown" class="ghost small" title="停止后台服务（无窗口启动时用）">⏻ 退出服务</button>
+  </div>
 </header>
 
 <main class="layout">
@@ -20,6 +23,11 @@
     <label class="field-label" for="prompt">需求描述</label>
     <textarea id="prompt" rows="9"
       placeholder="例如：帮我写一份《线性代数》期末复习笔记，中文，包含行列式、矩阵的秩、线性方程组三章；每章先总结知识点，再给 2 道例题和详细解答。"></textarea>
+
+    <div id="pdf2tex-box">
+      <button id="btn-pdf2tex" class="ghost wide">🔁 PDF 转 LaTeX（AI 近似重建，结果仅供格式参考）</button>
+      <input type="file" id="pdf2tex-input" accept=".pdf" hidden />
+    </div>
 
     <div id="drop-zone">
       <button id="btn-pick" class="ghost wide">📎 添加附件（.tex 格式示范 · .txt/.md/.pdf 知识来源 · 图片）</button>
@@ -48,6 +56,14 @@
       <li data-step="done"><span class="dot"></span>完成</li>
     </ol>
     <div id="status" class="status"></div>
+
+    <div class="history-box">
+      <div class="field-label history-head">
+        🕘 历史记录
+        <button id="btn-hist-refresh" class="linklike">刷新</button>
+      </div>
+      <ul id="history" class="history"><li class="hist-empty">暂无记录</li></ul>
+    </div>
   </aside>
 
   <section class="panel main">
@@ -60,8 +76,10 @@
     <div class="page active" id="page-pdf">
       <div class="toolbar">
         <a id="btn-download" class="btn" hidden download="document.pdf">⬇ 下载 PDF</a>
+        <a id="btn-tex-dl" class="btn" hidden download="converted.tex">⬇ 下载 .tex</a>
         <button id="btn-copy" class="btn" hidden>复制源码</button>
         <button id="btn-recompile" class="btn primary-btn" hidden>重新编译</button>
+        <button id="btn-use-format" class="btn" hidden>用作格式示范</button>
       </div>
       <embed id="pdf-view" type="application/pdf" hidden />
       <div id="pdf-empty" class="placeholder">生成完成后，PDF 会显示在这里</div>

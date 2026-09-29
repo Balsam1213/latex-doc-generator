@@ -3,7 +3,7 @@ const $$ = (s) => document.querySelectorAll(s);
 
 const state = {
   jobId: null, es: null, busy: false, codeShown: false, lastSource: null,
-  files: [],
+  files: [], kind: "generate",
 };
 const STEP_ORDER = ["generate", "compile", "fix", "done"];
 const FILE_EXTS = [".tex", ".txt", ".md", ".markdown", ".pdf", ".png", ".jpg", ".jpeg", ".webp"];
@@ -76,6 +76,8 @@ function resetOutput() {
   pv.removeAttribute("src");
   $("#pdf-empty").hidden = false;
   $("#btn-download").hidden = true;
+  $("#btn-tex-dl").hidden = true;
+  $("#btn-use-format").hidden = true;
   $("#btn-copy").hidden = true;
   $("#btn-recompile").hidden = true;
   $("#log-tab").hidden = true;
@@ -132,23 +134,10 @@ function renderFiles() {
 }
 
 /* ---------- 任务提交与 SSE ---------- */
-async function generate() {
-  const prompt = $("#prompt").value.trim();
-  if (!prompt) {
-    setStatus("请先填写需求描述。");
-    return;
-  }
-  resetOutput();
-  state.codeShown = false;
+async function startJob(fd, kind) {
+  state.kind = kind;
   setBusy(true);
-  setStatus("任务已提交，排队中…");
-
-  const fd = new FormData();
-  fd.append("prompt", prompt);
-  fd.append("doc_type", $("#doc-type").value);
-  if (state.files.length) fd.append("att_purpose", $("#att-purpose").value);
-  for (const f of state.files) fd.append("files", f, f.name);
-
+  setStatus(kind === "convert" ? "转换任务已提交，排队中…" : "任务已提交，排队中…");
   const res = await fetch("/api/jobs", { method: "POST", body: fd });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -158,8 +147,10 @@ async function generate() {
   }
   const { job_id } = await res.json();
   state.jobId = job_id;
-  state.files = []; // 附件已随任务上传
-  renderFiles();
+  if (kind === "generate") {
+    state.files = []; // 附件已随任务上传
+    renderFiles();
+  }
   state.es = new EventSource(`/api/jobs/${job_id}/events`);
   state.es.onmessage = (e) => handleEvent(JSON.parse(e.data));
   state.es.onerror = () => {
@@ -170,6 +161,32 @@ async function generate() {
       setStatus("✘ 与服务的连接中断，请重试。");
     }
   };
+}
+
+async function generate() {
+  const prompt = $("#prompt").value.trim();
+  if (!prompt) {
+    setStatus("请先填写需求描述。");
+    return;
+  }
+  resetOutput();
+  state.codeShown = false;
+
+  const fd = new FormData();
+  fd.append("prompt", prompt);
+  fd.append("doc_type", $("#doc-type").value);
+  if (state.files.length) fd.append("att_purpose", $("#att-purpose").value);
+  for (const f of state.files) fd.append("files", f, f.name);
+  await startJob(fd, "generate");
+}
+
+function pdf2tex(file) {
+  resetOutput();
+  state.codeShown = false;
+  const fd = new FormData();
+  fd.append("kind", "convert");
+  fd.append("files", file, file.name);
+  startJob(fd, "convert");
 }
 
 function handleEvent(ev) {
@@ -202,11 +219,11 @@ function handleEvent(ev) {
     state.es && state.es.close();
     setBusy(false);
     markAllDone();
-    setStatus("✔ 完成！可预览与下载，也可在「LaTeX 源码」页手动修改后点「重新编译」。");
     $("#code").value = ev.tex;
     $("#code").readOnly = false;
     state.lastSource = ev.tex;
     $("#btn-recompile").hidden = false;
+    $("#btn-copy").hidden = false;
     const url = ev.pdf_url + "?t=" + Date.now();
     const pv = $("#pdf-view");
     pv.src = url;
@@ -215,8 +232,16 @@ function handleEvent(ev) {
     const dl = $("#btn-download");
     dl.href = url;
     dl.hidden = false;
-    $("#btn-copy").hidden = false;
+    if (state.kind === "convert") {
+      $("#btn-tex-dl").href = ev.pdf_url.replace("main.pdf", "main.tex") + "?t=" + Date.now();
+      $("#btn-tex-dl").hidden = false;
+      $("#btn-use-format").hidden = false;
+      setStatus("✔ 转换完成！可下载 .tex，或点「用作格式示范」将其加入附件。注意：AI 近似重建，复杂版式与图片无法完全还原。");
+    } else {
+      setStatus("✔ 完成！可预览与下载，也可在「LaTeX 源码」页手动修改后点「重新编译」。");
+    }
     switchTab("pdf");
+    loadHistory();
   } else if (ev.type === "error") {
     state.es && state.es.close();
     setBusy(false);
@@ -233,6 +258,7 @@ function handleEvent(ev) {
       $("#log-tab").hidden = false;
     }
     switchTab("code");
+    loadHistory();
   }
 }
 
@@ -286,6 +312,143 @@ async function recompile() {
   }
 }
 
+/* ---------- 历史记录 ---------- */
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch("/api/history");
+    const { items } = await res.json();
+    const ul = $("#history");
+    ul.innerHTML = "";
+    if (!items.length) {
+      ul.innerHTML = '<li class="hist-empty">暂无记录</li>';
+      return;
+    }
+    for (const it of items) {
+      const li = document.createElement("li");
+      li.className = "hist-item";
+      const icon = it.status === "done" ? "✔" : it.status === "failed" ? "✘" : "⏳";
+      const badge = it.kind === "convert" ? '<em class="badge">转换</em>' : "";
+      const snippet = (it.prompt || "").slice(0, 32) + ((it.prompt || "").length > 32 ? "…" : "");
+      const main = document.createElement("div");
+      main.className = "hist-main";
+      main.innerHTML = `<span class="st ${it.status}">${icon}</span>${badge}<span class="txt" title="${it.prompt || ""}">${snippet}</span><span class="time">${fmtTime(it.created_at)}</span>`;
+      main.addEventListener("click", () => openJob(it.id));
+      const rm = document.createElement("button");
+      rm.className = "rm";
+      rm.textContent = "✕";
+      rm.title = "删除此记录及文件";
+      rm.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteHistory(it.id);
+      });
+      li.append(main, rm);
+      ul.appendChild(li);
+    }
+  } catch (e) {
+    /* 历史加载失败不影响主功能 */
+  }
+}
+
+async function deleteHistory(id) {
+  await fetch(`/api/jobs/${id}`, { method: "DELETE" }).catch(() => {});
+  if (state.jobId === id) {
+    state.jobId = null;
+    resetOutput();
+  }
+  loadHistory();
+}
+
+async function openJob(id) {
+  if (state.busy) return; // 任务运行中不允许切换
+  const res = await fetch(`/api/jobs/${id}`);
+  if (!res.ok) {
+    loadHistory();
+    return;
+  }
+  const d = await res.json();
+  state.es && state.es.close();
+  state.es = null;
+  state.jobId = id;
+  state.kind = d.kind || "generate";
+  state.codeShown = true;
+  state.lastSource = d.tex || null;
+  setBusy(false);
+  setStep(null);
+  $("#code").value = d.tex || "";
+  $("#code").readOnly = false;
+  $("#btn-copy").hidden = false;
+  $("#btn-recompile").hidden = false;
+  $("#btn-tex-dl").hidden = d.kind !== "convert";
+  $("#btn-use-format").hidden = d.kind !== "convert";
+  if (d.kind === "convert") {
+    $("#btn-tex-dl").href = `/workspace/${id}/main.tex?t=` + Date.now();
+  }
+  const pv = $("#pdf-view");
+  if (d.pdf_url) {
+    pv.src = d.pdf_url + "?t=" + Date.now();
+    pv.hidden = false;
+    $("#pdf-empty").hidden = true;
+    $("#btn-download").href = d.pdf_url + "?t=" + Date.now();
+    $("#btn-download").hidden = false;
+    switchTab("pdf");
+  } else {
+    pv.hidden = true;
+    pv.removeAttribute("src");
+    $("#pdf-empty").hidden = false;
+    $("#btn-download").hidden = true;
+    switchTab("code");
+  }
+  const st = d.status === "done" ? "已完成" : d.status === "failed" ? "失败" : d.status;
+  setStatus(`已加载历史任务（${st}）${d.error ? "：" + d.error : ""}`);
+  $("#log-tab").hidden = true;
+  markAllDoneIfDone(d.status);
+}
+
+function markAllDoneIfDone(status) {
+  if (status === "done") markAllDone();
+  else setStep(null);
+}
+
+/* ---------- 退出服务 / 用作格式示范 ---------- */
+async function shutdownService() {
+  if (!confirm("确定退出服务？页面将不可用，之后可双击桌面图标重新启动。")) return;
+  setStatus("正在退出服务…");
+  try {
+    const res = await fetch("/api/shutdown", { method: "POST" });
+    if (res.ok) {
+      setStatus("服务已退出。重新启动：双击桌面「LaTeX 文档生成器」图标。");
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setStatus(err.detail || "退出失败：可能是以控制台方式启动的，请直接关闭命令行窗口。");
+    }
+  } catch (e) {
+    setStatus("服务已退出。重新启动：双击桌面「LaTeX 文档生成器」图标。");
+  }
+}
+
+async function useAsFormat() {
+  try {
+    const res = await fetch(`/workspace/${state.jobId}/main.tex?t=` + Date.now());
+    const text = await res.text();
+    const file = new File([text], "converted_format.tex", { type: "application/x-tex" });
+    state.files = state.files.filter((f) => f.name !== file.name);
+    state.files.push(file);
+    renderFiles();
+    $("#att-purpose").value = "format";
+    setStatus("已把转换结果加入附件，用途设为「仅作格式示范」。填写需求后点「生成 PDF」。");
+    $("#prompt").focus();
+  } catch (e) {
+    setStatus("✘ 读取转换结果失败，请重试。");
+  }
+}
+
 /* ---------- 事件绑定 ---------- */
 $("#code").addEventListener("input", () => {
   // 已有编译结果时，提示用户可重新编译使修改生效
@@ -317,5 +480,20 @@ dropZone.addEventListener("drop", (e) => {
   dropZone.classList.remove("dragover");
   addFiles([...e.dataTransfer.files]);
 });
+
+$("#btn-pdf2tex").addEventListener("click", () => $("#pdf2tex-input").click());
+$("#pdf2tex-input").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (f) pdf2tex(f);
+  e.target.value = "";
+});
+$("#btn-use-format").addEventListener("click", useAsFormat);
+$("#btn-shutdown").addEventListener("click", shutdownService);
+$("#btn-hist-refresh").addEventListener("click", loadHistory);
+$("#btn-tex-dl").addEventListener("click", (e) => {
+  if (!e.currentTarget.href) e.preventDefault();
+});
+
+loadHistory();
 
 init();

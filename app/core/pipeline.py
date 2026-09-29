@@ -1,16 +1,21 @@
 """任务流水线：识别附件 → 生成 LaTeX → 编译 → 失败则带错误日志回喂模型修复 → 循环。
 
+支持两种任务：kind="generate"（按需求生成）、kind="convert"（PDF 转 LaTeX，近似重建）。
+
 在工作线程中运行，通过 queue.Queue 向 SSE 端点推送事件：
   {"type": "stage",  "stage": "preparing"|"generating"|"compiling"|"fixing", "round": n}
   {"type": "token",  "text": "..."}
   {"type": "notice", "text": "..."}
-  {"type": "done",   "pdf_url": "...", "tex": "..."}
+  {"type": "done",   "pdf_url": "...", "tex": "...", "kind": "generate|convert"}
   {"type": "error",  "message": "...", "log": "...", "tex": "..."}
+任务结束时把元数据写入 workspace/{id}/meta.json，供历史记录功能使用。
 """
 import base64
+import json
 import queue
 import re
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -26,6 +31,7 @@ _DOC = re.compile(r"(\\documentclass.*?\\end\{document\})", re.S)
 
 _TEXT_PART_LIMIT = 15000  # 每个附件注入提示词的最大字符数
 _IMAGE_DESC_LIMIT = 6000  # 单张图片识别结果的最大字符数
+_PDF_TEXT_LIMIT = 30000   # PDF 转换时注入的最大字符数
 _MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
@@ -58,7 +64,7 @@ def _pdf_text(path: Path) -> str:
     reader = PdfReader(str(path))
     text = "\n\n".join((page.extract_text() or "") for page in reader.pages[:20])
     if not text.strip():
-        raise ValueError("没有可提取的文本（可能是扫描件），请改传图片")
+        raise ValueError("没有可提取的文本（可能是扫描件），请改传图片或选择其他 PDF")
     return text
 
 
@@ -104,16 +110,19 @@ class Job:
     def __init__(
         self,
         prompt: str,
-        doc_type: str,
+        doc_type: str = "auto",
         att_purpose: str = "auto",
         attachments: list[dict] | None = None,
+        kind: str = "generate",
     ):
         self.id = uuid.uuid4().hex[:12]
+        self.kind = kind  # generate / convert
         self.prompt = prompt
         self.doc_type = doc_type
         self.att_purpose = att_purpose
         self.attachments = attachments or []
         self.status = "queued"  # queued / running / done / failed / cancelled
+        self.created_at = time.time()
         self.events: "queue.Queue[dict]" = queue.Queue()
         self.cancel_event = threading.Event()
         self.tex = ""
@@ -127,6 +136,30 @@ class Job:
     def _check_cancel(self) -> None:
         if self.cancel_event.is_set():
             raise JobCancelled()
+
+    def meta(self) -> dict:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "prompt": self.prompt,
+            "doc_type": self.doc_type,
+            "status": self.status,
+            "created_at": self.created_at,
+            "finished_at": time.time(),
+            "error": self.error,
+            "attachments": [a["name"] for a in self.attachments],
+        }
+
+    def save_meta(self) -> None:
+        """把任务元数据写入磁盘，供历史记录在重启后仍可查看。"""
+        try:
+            d = config.WORKSPACE_DIR / self.id
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "meta.json").write_text(
+                json.dumps(self.meta(), ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
 
 
 def _collect(job: Job, messages: list[dict], temperature: float = 0.35) -> str:
@@ -144,19 +177,35 @@ def _collect(job: Job, messages: list[dict], temperature: float = 0.35) -> str:
 def run_job(job: Job) -> None:
     job.status = "running"
     try:
-        attachment_context = ""
-        if job.attachments:
-            job.emit({"type": "stage", "stage": "preparing"})
-            attachment_context = _prepare_attachments(job)
+        if job.kind == "convert":
+            pdf_att = next((a for a in job.attachments if a["kind"] == "pdf"), None)
+            if not pdf_att:
+                raise RuntimeError("PDF 转换任务需要一个 PDF 附件")
+            text = _clip(_pdf_text(Path(pdf_att["path"])), _PDF_TEXT_LIMIT)
+            job.emit({
+                "type": "notice",
+                "text": f"已提取 PDF 文本（约 {len(text)} 字），正在由模型重建 LaTeX（结果为近似转换，仅供格式参考）…",
+            })
+            messages = [
+                {"role": "system", "content": prompts.CONVERT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompts.build_convert_prompt(text)},
+            ]
+        else:
+            attachment_context = ""
+            if job.attachments:
+                job.emit({"type": "stage", "stage": "preparing"})
+                attachment_context = _prepare_attachments(job)
+            job.emit({"type": "stage", "stage": "generating"})
+            user_content = prompts.build_user_prompt(job.prompt, job.doc_type)
+            if attachment_context:
+                user_content += "\n\n" + attachment_context
+            messages = [
+                {"role": "system", "content": prompts.SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ]
 
-        job.emit({"type": "stage", "stage": "generating"})
-        user_content = prompts.build_user_prompt(job.prompt, job.doc_type)
-        if attachment_context:
-            user_content += "\n\n" + attachment_context
-        messages = [
-            {"role": "system", "content": prompts.SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        if job.kind == "convert":
+            job.emit({"type": "stage", "stage": "generating"})
         raw = _collect(job, messages)
         tex = extract_tex(raw)
         if not tex:
@@ -183,7 +232,8 @@ def run_job(job: Job) -> None:
             if result.ok:
                 job.pdf_url = f"/workspace/{job.id}/main.pdf"
                 job.status = "done"
-                job.emit({"type": "done", "pdf_url": job.pdf_url, "tex": job.tex})
+                job.save_meta()
+                job.emit({"type": "done", "pdf_url": job.pdf_url, "tex": job.tex, "kind": job.kind})
                 return
 
             errors = error_fixer.extract_errors(result.log)
@@ -205,11 +255,14 @@ def run_job(job: Job) -> None:
             f"自动修复 {config.MAX_FIX_ROUNDS} 轮后仍编译失败。"
             "可在「LaTeX 源码」页手动修改后点击「重新编译」。"
         )
+        job.save_meta()
         job.emit({"type": "error", "message": job.error, "log": job.log, "tex": job.tex})
     except JobCancelled:
         job.status = "cancelled"
+        job.save_meta()
         job.emit({"type": "error", "message": "任务已取消。", "log": job.log, "tex": job.tex})
     except Exception as e:
         job.status = "failed"
         job.error = str(e)
+        job.save_meta()
         job.emit({"type": "error", "message": str(e), "log": job.log, "tex": job.tex})

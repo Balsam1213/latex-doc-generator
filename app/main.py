@@ -1,6 +1,9 @@
-"""FastAPI 入口：页面、任务接口（含附件上传）、SSE 进度流、健康自检。"""
+"""FastAPI 入口：页面、任务接口（含附件上传与 PDF 转换）、历史记录、SSE 进度流、健康自检、优雅退出。"""
 import json
 import queue
+import shutil
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -16,6 +19,9 @@ app = FastAPI(title="LaTeX 文档生成器")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# python -m app.main / start_app.pyw 启动时持有 uvicorn.Server，供「退出服务」使用
+server_handle: dict = {"server": None}
+
 
 class RecompileRequest(BaseModel):
     tex: str
@@ -28,14 +34,19 @@ def index():
 
 @app.post("/api/jobs")
 async def create_job(
-    prompt: str = Form(...),
+    prompt: str = Form(""),
     doc_type: str = Form("auto"),
     att_purpose: str = Form("auto"),
+    kind: str = Form("generate"),
     files: list[UploadFile] = File(default=[]),
 ):
     prompt = (prompt or "").strip()
-    if not prompt:
+    if kind not in ("generate", "convert"):
+        raise HTTPException(400, "未知的任务类型")
+    if kind == "generate" and not prompt:
         raise HTTPException(400, "需求描述不能为空")
+    if kind == "convert" and not prompt:
+        prompt = "将 PDF 转换为 LaTeX 文档"
     if doc_type not in prompts.DOC_TYPES:
         raise HTTPException(400, "未知的文档类型")
     if att_purpose not in ("auto", "format", "content"):
@@ -49,6 +60,9 @@ async def create_job(
         if ext not in config.ALLOWED_EXTS:
             raise HTTPException(400, f"不支持的附件类型：{name}（支持 tex/txt/md/pdf/png/jpg/webp）")
         metas.append((f, name, ext))
+
+    if kind == "convert" and not any(ext == ".pdf" for _, _, ext in metas):
+        raise HTTPException(400, "PDF 转换任务需要上传一个 PDF 文件")
 
     attachments = []
     if metas:
@@ -68,38 +82,110 @@ async def create_job(
             finally:
                 await f.close()
             if ext in config.IMAGE_EXTS:
-                kind = "image"
+                att_kind = "image"
             elif ext == ".tex":
-                kind = "tex"
+                att_kind = "tex"
             elif ext == ".pdf":
-                kind = "pdf"
+                att_kind = "pdf"
             else:
-                kind = "text"
-            attachments.append({"name": name, "kind": kind, "path": str(dest)})
+                att_kind = "text"
+            attachments.append({"name": name, "kind": att_kind, "path": str(dest)})
 
-    job = jobs.manager.create(prompt, doc_type, att_purpose, attachments)
+    job = jobs.manager.create(prompt, doc_type, att_purpose, attachments, kind)
     return {"job_id": job.id}
+
+
+# ---------- 任务详情 / 历史 ----------
+
+def _read_meta(job_id: str) -> dict | None:
+    meta_path = config.WORKSPACE_DIR / job_id / "meta.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _job_payload(job_id: str) -> dict | None:
+    """优先取内存任务，否则从磁盘 meta.json 回退（重启后历史任务仍可查看/重编译）。"""
+    job = jobs.manager.get(job_id)
+    if job:
+        return {
+            "job_id": job.id,
+            "kind": job.kind,
+            "status": job.status,
+            "prompt": job.prompt,
+            "tex": job.tex,
+            "pdf_url": job.pdf_url,
+            "error": job.error,
+        }
+    meta = _read_meta(job_id)
+    if not meta:
+        return None
+    d = config.WORKSPACE_DIR / job_id
+    tex = ""
+    tex_file = d / "main.tex"
+    if tex_file.is_file():
+        tex = tex_file.read_text(encoding="utf-8", errors="replace")
+    return {
+        "job_id": job_id,
+        "kind": meta.get("kind", "generate"),
+        "status": meta.get("status", "unknown"),
+        "prompt": meta.get("prompt", ""),
+        "tex": tex,
+        "pdf_url": f"/workspace/{job_id}/main.pdf" if (d / "main.pdf").is_file() else "",
+        "error": meta.get("error", ""),
+    }
 
 
 @app.get("/api/jobs/{job_id}")
 def job_info(job_id: str):
-    job = jobs.manager.get(job_id)
-    if not job:
+    data = _job_payload(job_id)
+    if not data:
         raise HTTPException(404, "任务不存在")
-    return {
-        "job_id": job.id,
-        "status": job.status,
-        "tex": job.tex,
-        "pdf_url": job.pdf_url,
-        "error": job.error,
-    }
+    return data
+
+
+@app.get("/api/history")
+def history():
+    items = []
+    if config.WORKSPACE_DIR.is_dir():
+        for d in config.WORKSPACE_DIR.iterdir():
+            if not d.is_dir() or d.name.startswith("_"):
+                continue
+            meta = _read_meta(d.name)
+            if not meta:
+                continue
+            items.append({
+                "id": meta.get("id", d.name),
+                "kind": meta.get("kind", "generate"),
+                "status": meta.get("status", "unknown"),
+                "prompt": meta.get("prompt", ""),
+                "doc_type": meta.get("doc_type", ""),
+                "created_at": meta.get("created_at", 0),
+                "has_pdf": (d / "main.pdf").is_file(),
+                "has_tex": (d / "main.tex").is_file(),
+            })
+    items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return {"items": items[:100]}
+
+
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    d = config.WORKSPACE_DIR / job_id
+    if not d.is_dir():
+        raise HTTPException(404, "任务不存在")
+    shutil.rmtree(d, ignore_errors=True)
+    jobs.manager.forget(job_id)
+    return {"ok": True}
 
 
 @app.get("/api/jobs/{job_id}/events")
 def job_events(job_id: str):
     job = jobs.manager.get(job_id)
     if not job:
-        raise HTTPException(404, "任务不存在")
+        raise HTTPException(404, "任务不存在（历史任务不支持实时进度）")
 
     def gen():
         # 任务已结束时（页面刷新后重连等），无需再推流
@@ -132,27 +218,53 @@ def cancel_job(job_id: str):
 
 @app.post("/api/jobs/{job_id}/recompile")
 def recompile(job_id: str, req: RecompileRequest):
-    """用户手动修改源码后重新编译（同步执行，编译期间由线程池承载）。"""
-    job = jobs.manager.get(job_id)
-    if not job:
-        raise HTTPException(404, "任务不存在")
+    """手动修改源码后重新编译（历史任务重启服务后同样可用，直接基于磁盘操作）。"""
     tex = req.tex.strip()
     if "\\documentclass" not in tex:
         raise HTTPException(400, "这不是完整的 LaTeX 文档（缺少 \\documentclass）")
-    job_dir = config.WORKSPACE_DIR / job.id
+    job_dir = config.WORKSPACE_DIR / job_id
     if not job_dir.is_dir():
-        raise HTTPException(404, "任务工作目录不存在，请重新生成")
+        raise HTTPException(404, "任务工作目录不存在")
+
     (job_dir / "main.tex").write_text(tex, encoding="utf-8")
-    job.tex = tex
     result = compiler.compile_tex(job_dir)
-    job.log = result.log
+
+    job = jobs.manager.get(job_id)
+    if job:
+        job.tex = tex
+        job.log = result.log
+        if result.ok:
+            job.pdf_url = f"/workspace/{job.id}/main.pdf"
+            job.status = "done"
+            job.error = ""
+        else:
+            job.status = "failed"
+        job.save_meta()
+    else:
+        meta = _read_meta(job_id)
+        if meta:
+            meta["status"] = "done" if result.ok else "failed"
+            meta["finished_at"] = time.time()
+            try:
+                (job_dir / "meta.json").write_text(
+                    json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            except OSError:
+                pass
+
     if result.ok:
-        job.pdf_url = f"/workspace/{job.id}/main.pdf"
-        job.status = "done"
-        job.error = ""
-        return {"ok": True, "pdf_url": job.pdf_url, "log": result.log}
-    job.status = "failed"
+        return {"ok": True, "pdf_url": f"/workspace/{job_id}/main.pdf", "log": result.log}
     return {"ok": False, "errors": error_fixer.extract_errors(result.log), "log": result.log}
+
+
+@app.post("/api/shutdown")
+def shutdown():
+    """无窗口启动时，由页面按钮干净退出服务。"""
+    server = server_handle.get("server")
+    if not server:
+        raise HTTPException(400, "当前以控制台方式启动：直接关闭命令行窗口即可停止服务")
+    threading.Timer(0.6, setattr, args=(server, "should_exit", True)).start()
+    return {"ok": True}
 
 
 @app.get("/api/health")
@@ -179,4 +291,6 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=config.HOST, port=config.PORT)
+    server = uvicorn.Server(uvicorn.Config(app, host=config.HOST, port=config.PORT))
+    server_handle["server"] = server
+    server.run()

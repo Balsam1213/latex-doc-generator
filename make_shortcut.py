@@ -1,6 +1,8 @@
-"""生成桌面快捷方式：双击「LaTeX 文档生成器」即可启动服务并打开页面。
+"""生成桌面快捷方式：双击「LaTeX 文档生成器」即可无窗口启动服务并打开页面。
 
 用法：python make_shortcut.py
+快捷方式指向 pythonw + start_app.pyw（不出现命令提示符窗口）；
+停止服务用页面右上角「退出服务」按钮（控制台方式启动则直接关窗口）。
 会同时生成程序图标 app.ico（需要 Pillow，未安装则使用默认图标）。
 """
 import base64
@@ -41,14 +43,18 @@ def make_icon() -> bool:
 
 
 def create_shortcut() -> None:
+    # 优先用 pythonw（无控制台窗口）；不存在则退回 python
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    launcher = pythonw if pythonw.is_file() else Path(sys.executable)
     ps = f"""
 $ws = New-Object -ComObject WScript.Shell
 $desktop = [Environment]::GetFolderPath('Desktop')
 $lnk = $ws.CreateShortcut((Join-Path $desktop '{SHORTCUT_NAME}'))
-$lnk.TargetPath = '{ROOT / "start_app.bat"}'
+$lnk.TargetPath = '{launcher}'
+$lnk.Arguments = '"{ROOT / "start_app.pyw"}"'
 $lnk.WorkingDirectory = '{ROOT}'
 $lnk.IconLocation = '{ICON},0'
-$lnk.Description = 'LaTeX 文档生成器 - 双击启动本地服务并打开页面'
+$lnk.Description = 'LaTeX 文档生成器 - 无窗口启动服务并打开页面（退出：页面右上角按钮）'
 $lnk.Save()
 Write-Output ("已创建快捷方式: " + (Join-Path $desktop '{SHORTCUT_NAME}'))
 """
