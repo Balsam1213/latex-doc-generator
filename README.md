@@ -21,13 +21,18 @@ Tectonic 自动编译 → 编译失败自动修复（最多 3 轮）→ 网页�
 - Windows + Python 3.10+（已在 3.14 上开发测试）
 - 能访问智谱开放平台（生成）与 CTAN 镜像（Tectonic 首次编译下载宏包）
 
-## 首次准备（两步）
+## 首次准备
 
 1. **放置编译器**：把 `tectonic.exe` 放入项目 `vendor/` 目录。
    （若还没下载：从 [Releases](https://github.com/tectonic-typesetting/tectonic/releases)
    下载 `x86_64-pc-windows-msvc.zip` 解压，或直接运行 `python download_tectonic.py`）
-2. **配置 Key**：打开根目录的 `.env`，把 `LLM_API_KEY=` 后面换成你的智谱 API Key
-   （在 [open.bigmodel.cn](https://open.bigmodel.cn) 的「API Keys」页面创建）。
+2. **API Key（三选一，之后不再提示）**：
+   - **首次启动引导**：双击快捷方式启动时，若未配置 Key 会自动弹出设置窗口，
+     内含 [open.bigmodel.cn](https://open.bigmodel.cn) 链接与获取步骤，填好保存即继续启动
+   - **页面内修改**：页面右上角「🔑 设置」，可随时查看状态（脱敏）并更换 Key，保存立即生效
+   - **手动改 .env**：把 `LLM_API_KEY=` 后面换成你的 Key
+
+Key 在 [open.bigmodel.cn](https://open.bigmodel.cn) 的「控制台 → API Keys」页面创建，GLM-Flash 系列免费。
 
 ## 启动与使用
 

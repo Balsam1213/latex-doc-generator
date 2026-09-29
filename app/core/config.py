@@ -47,3 +47,25 @@ def find_tectonic() -> str | None:
 
 def llm_configured() -> bool:
     return bool(LLM_API_KEY) and "在此填入" not in LLM_API_KEY
+
+
+def save_env_value(key: str, value: str) -> None:
+    """把一个配置项写回 .env（存在则替换，否则追加），并立即更新本进程的运行时值。"""
+    env_path = BASE_DIR / ".env"
+    lines: list[str] = []
+    if env_path.is_file():
+        lines = env_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    replaced = False
+    new_lines: list[str] = []
+    for line in lines:
+        if line.strip().upper().startswith(f"{key.upper()}="):
+            new_lines.append(f"{key}={value}")
+            replaced = True
+        else:
+            new_lines.append(line)
+    if not replaced:
+        if new_lines and new_lines[-1].strip():
+            new_lines.append("")
+        new_lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    globals()[key] = value

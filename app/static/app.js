@@ -449,6 +449,52 @@ async function useAsFormat() {
   }
 }
 
+/* ---------- API Key 设置 ---------- */
+async function openSettings() {
+  $("#cfg-error").hidden = true;
+  $("#cfg-key").value = "";
+  try {
+    const res = await fetch("/api/config");
+    const c = await res.json();
+    $("#cfg-current").textContent = c.llm_configured
+      ? `已配置（${c.llm_api_key_masked}），模型 ${c.llm_model}`
+      : "未配置——请按下面步骤获取并填入";
+    $("#cfg-current").className = "cfg-current " + (c.llm_configured ? "ok" : "bad");
+  } catch (e) {
+    $("#cfg-current").textContent = "读取失败";
+  }
+  $("#modal-mask").hidden = false;
+  $("#cfg-key").focus();
+}
+
+function closeSettings() {
+  $("#modal-mask").hidden = true;
+}
+
+async function saveSettings() {
+  const key = $("#cfg-key").value.trim();
+  const errEl = $("#cfg-error");
+  if (!key) {
+    errEl.textContent = "请先粘贴 API Key";
+    errEl.hidden = false;
+    return;
+  }
+  const res = await fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ llm_api_key: key }),
+  });
+  if (res.ok) {
+    closeSettings();
+    setStatus("✔ API Key 已更新，立即生效（无需重启）。");
+    init(); // 刷新顶栏状态
+  } else {
+    const err = await res.json().catch(() => ({}));
+    errEl.textContent = err.detail || "保存失败";
+    errEl.hidden = false;
+  }
+}
+
 /* ---------- 事件绑定 ---------- */
 $("#code").addEventListener("input", () => {
   // 已有编译结果时，提示用户可重新编译使修改生效
@@ -490,6 +536,15 @@ $("#pdf2tex-input").addEventListener("change", (e) => {
 $("#btn-use-format").addEventListener("click", useAsFormat);
 $("#btn-shutdown").addEventListener("click", shutdownService);
 $("#btn-hist-refresh").addEventListener("click", loadHistory);
+$("#btn-settings").addEventListener("click", openSettings);
+$("#cfg-save").addEventListener("click", saveSettings);
+$("#cfg-cancel").addEventListener("click", closeSettings);
+$("#cfg-key").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") saveSettings();
+});
+$("#modal-mask").addEventListener("click", (e) => {
+  if (e.target === $("#modal-mask")) closeSettings();
+});
 $("#btn-tex-dl").addEventListener("click", (e) => {
   if (!e.currentTarget.href) e.preventDefault();
 });

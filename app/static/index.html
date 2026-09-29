@@ -11,6 +11,7 @@
   <h1>📄 LaTeX 文档生成器</h1>
   <div class="topbar-right">
     <div id="health" class="health">正在检测环境…</div>
+    <button id="btn-settings" class="ghost small" title="配置智谱 API Key">🔑 设置</button>
     <button id="btn-shutdown" class="ghost small" title="停止后台服务（无窗口启动时用）">⏻ 退出服务</button>
   </div>
 </header>
@@ -97,5 +98,23 @@
 </main>
 
 <script src="/static/app.js"></script>
+
+<div id="modal-mask" class="modal-mask" hidden>
+  <div class="modal">
+    <h3>🔑 API Key 设置</h3>
+    <p class="cfg-line">当前状态：<span id="cfg-current" class="cfg-current">…</span></p>
+    <ol class="cfg-steps">
+      <li>打开 <a href="https://open.bigmodel.cn" target="_blank" rel="noopener">open.bigmodel.cn</a> 并注册 / 登录</li>
+      <li>右上角「控制台」→「API Keys」→「创建 API Key」并复制</li>
+      <li>把 Key 粘贴到下面保存（立即生效，无需重启；只存本机 .env）</li>
+    </ol>
+    <input id="cfg-key" type="text" spellcheck="false" placeholder="粘贴新的 API Key" />
+    <p id="cfg-error" class="cfg-error" hidden></p>
+    <div class="modal-btns">
+      <button id="cfg-cancel" class="ghost">取消</button>
+      <button id="cfg-save" class="primary">保存</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -27,6 +27,10 @@ class RecompileRequest(BaseModel):
     tex: str
 
 
+class ConfigRequest(BaseModel):
+    llm_api_key: str = ""
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -267,6 +271,35 @@ def shutdown():
     return {"ok": True}
 
 
+# ---------- API Key 配置 ----------
+
+def _mask_key(key: str) -> str:
+    return f"{key[:6]}····{key[-4:]}" if len(key) > 14 else "已配置"
+
+
+@app.get("/api/config")
+def get_config():
+    configured = config.llm_configured()
+    return {
+        "llm_configured": configured,
+        "llm_api_key_masked": _mask_key(config.LLM_API_KEY) if configured else "",
+        "llm_model": config.LLM_MODEL,
+        "vision_model": config.LLM_VISION_MODEL,
+        "llm_base_url": config.LLM_BASE_URL,
+    }
+
+
+@app.post("/api/config")
+def set_config(req: ConfigRequest):
+    key = req.llm_api_key.strip()
+    if not key or "在此填入" in key:
+        raise HTTPException(400, "请粘贴有效的 API Key")
+    config.save_env_value("LLM_API_KEY", key)
+    if not config.llm_configured():
+        raise HTTPException(500, "保存失败：请检查项目目录是否可写")
+    return {"ok": True, "llm_api_key_masked": _mask_key(key)}
+
+
 @app.get("/api/health")
 def health():
     tectonic = config.find_tectonic()
@@ -291,6 +324,10 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if __name__ == "__main__":
     import uvicorn
 
+    from .core import first_run
+
+    if not first_run.ensure_api_key():
+        raise SystemExit(0)  # 用户取消了首次设置
     server = uvicorn.Server(uvicorn.Config(app, host=config.HOST, port=config.PORT))
     server_handle["server"] = server
     server.run()

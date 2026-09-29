@@ -42,6 +42,10 @@ def _service_running() -> bool:
 if _service_running():
     webbrowser.open(URL)
 else:
+    from app.core import first_run
+
+    if not first_run.ensure_api_key():
+        sys.exit(0)  # 用户取消了首次设置
     if not os.environ.get("LATEX_NO_BROWSER"):
         threading.Timer(2.0, webbrowser.open, args=(URL,)).start()
     from app.main import app, server_handle
